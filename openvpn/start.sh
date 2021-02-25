@@ -50,6 +50,45 @@ VPN_PROVIDER="${VPN_PROVIDER,,}" # to lowercase
 VPN_PROVIDER_HOME="/etc/openvpn/${VPN_PROVIDER}"
 mkdir -p "$VPN_PROVIDER_HOME"
 
+# Support different sources of configs:
+# - Dynamic configs rely on a script in this repo
+# - Static configs rely on a config repo containing .ovpn files
+VPN_CONFIG_SOURCE="${VPN_CONFIG_SOURCE:-dynamic}"
+VPN_CONFIG_SOURCE="${VPN_CONFIG_SOURCE,,}" # to lowercase
+
+if [[ "${VPN_CONFIG_SOURCE}" == "static" ]]; then
+
+  # Establish GitHub repo to download configurations from, fetch the zip file with all configs
+  CONFIG_SOURCE_REPO="${CONFIG_SOURCE_REPO:-haugene/vpn-configs}"
+  CONFIG_SOURCE_REVISION="${CONFIG_SOURCE_REVISION:-main}"
+  CONFIG_BUNDLE_URL="https://github.com/${CONFIG_SOURCE_REPO}/archive/${CONFIG_SOURCE_REVISION}.zip"
+  
+  # Create a temporary file and download bundle to it
+  config_repo_temp_zip_file=$(mktemp)
+  echo "Downloading configs from ${CONFIG_BUNDLE_URL} into ${config_repo_temp_zip_file}"
+  curl -sSL -o ${config_repo_temp_zip_file} "${CONFIG_BUNDLE_URL}"
+
+  # Create a temporary folder and extract configs there
+  config_repo_temp_dir=$(mktemp -d)
+  echo "Extracting configs to ${config_repo_temp_dir}"
+  unzip -q ${config_repo_temp_zip_file} -d ${config_repo_temp_dir}
+
+  # Find the specified provider folder. Should be under <tmpDir>/<some-root-folder>/openvpn/<provider>
+  provider_configs=$(find ${config_repo_temp_dir}/*/openvpn -type d -name ${VPN_PROVIDER})
+  if [[ -z ${provider_configs} ]]; then
+    echo "ERROR: Could not find any configs for provider ${VPN_PROVIDER} in downloaded configs"
+    exit 1
+  fi
+
+  # Replace current provider home folder with the downloaded directory
+  echo "Found configs for ${VPN_PROVIDER} in ${provider_configs}, will replace current content in ${VPN_PROVIDER_HOME}"
+  rm -r ${VPN_PROVIDER_HOME}
+  mv ${provider_configs} ${VPN_PROVIDER_HOME}
+
+  # Clean up temporary files
+  rm -rf ${config_repo_temp_zip_file} ${config_repo_temp_dir}
+fi
+
 # Make sure that we have enough information to start OpenVPN
 if [[ -z $OPENVPN_CONFIG_URL ]] && [[ "${OPENVPN_PROVIDER}" == "**None**" ]] || [[ -z "${OPENVPN_PROVIDER-}" ]]; then
   echo "ERROR: Cannot determine where to find your OpenVPN config. Both OPENVPN_CONFIG_URL and OPENVPN_PROVIDER is unset."
